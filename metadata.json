@@ -1,0 +1,5 @@
+{
+  "name": "Maternal AI Chat",
+  "description": "An AI-powered assistant providing maternal health support and information.",
+  "requestFramePermissions": ["microphone"]
+}
