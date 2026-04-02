@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Heart, Info, User, Bot, Loader2, Globe, Mic, MicOff, Volume2, VolumeX, Trash2, ThumbsUp, ThumbsDown, Check, MessageSquare, Bell, Calendar, Clock, Plus, X, AlertCircle, ChevronLeft, ChevronRight, List, Pencil, Save, Home, Settings, Sparkles } from "lucide-react";
+import { Send, Heart, Info, User, Bot, Loader2, Globe, Mic, MicOff, Volume2, VolumeX, Trash2, ThumbsUp, ThumbsDown, Check, MessageSquare, Bell, Calendar, Clock, Plus, X, AlertCircle, ChevronLeft, ChevronRight, List, Pencil, Save, Home, Settings, Sparkles, Zap, Activity, BookOpen, Volume } from "lucide-react";
 import { GoogleGenAI } from "@google/genai";
 import { motion, AnimatePresence } from "motion/react";
 import Markdown from "react-markdown";
@@ -35,6 +35,29 @@ interface Appointment {
   notifiedTwoDaysBefore?: boolean;
 }
 
+interface HealthMetric {
+  id: string;
+  date: string;
+  weight?: number;
+  systolic?: number;  // BP systolic
+  diastolic?: number; // BP diastolic
+  bloodSugar?: number;
+}
+
+interface SymptomLog {
+  id: string;
+  date: string;
+  symptoms: string[];
+  notes?: string;
+}
+
+interface JournalEntry {
+  id: string;
+  date: string;
+  title: string;
+  content: string;
+}
+
 declare global {
   interface Window {
     SpeechRecognition: any;
@@ -43,7 +66,7 @@ declare global {
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState<"home" | "chat" | "calendar" | "profile">("home");
+  const [activeTab, setActiveTab] = useState<"home" | "chat" | "calendar" | "profile" | "health" | "journal">("home");
   const [selectedLang, setSelectedLang] = useState<LanguageKey>(() => {
     const saved = localStorage.getItem("maternal_ai_lang");
     return (saved as LanguageKey) || "english";
@@ -78,6 +101,38 @@ function App() {
   const [activeNotification, setActiveNotification] = useState<(Appointment & { isTwoDayNotification?: boolean }) | null>(null);
   const [editingApptId, setEditingApptId] = useState<string | null>(null);
   const [editApptData, setEditApptData] = useState({ title: "", date: "", time: "" });
+
+  // Health Metrics State
+  const [healthMetrics, setHealthMetrics] = useState<HealthMetric[]>(() => {
+    const saved = localStorage.getItem("maternal_ai_metrics");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [showMetricsForm, setShowMetricsForm] = useState(false);
+  const [newMetric, setNewMetric] = useState({ date: new Date().toISOString().split('T')[0], weight: "", systolic: "", diastolic: "", bloodSugar: "" });
+
+  // Symptom Tracker State
+  const [symptomLogs, setSymptomLogs] = useState<SymptomLog[]>(() => {
+    const saved = localStorage.getItem("maternal_ai_symptoms");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [showSymptomForm, setShowSymptomForm] = useState(false);
+  const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
+  const [symptomNotes, setSymptomNotes] = useState("");
+
+  // Journal State
+  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>(() => {
+    const saved = localStorage.getItem("maternal_ai_journal");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [showJournalForm, setShowJournalForm] = useState(false);
+  const [newJournalEntry, setNewJournalEntry] = useState({ title: "", content: "" });
+
+  // Kick Counter State
+  const [kickCounterActive, setKickCounterActive] = useState(false);
+  const [kickCount, setKickCount] = useState(0);
+  const [kickStartTime, setKickStartTime] = useState<Date | null>(null);
+  const [showKickCounterModal, setShowKickCounterModal] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
 
@@ -95,6 +150,21 @@ function App() {
   useEffect(() => {
     localStorage.setItem("maternal_ai_appointments", JSON.stringify(appointments));
   }, [appointments]);
+
+  // Save health metrics to local storage
+  useEffect(() => {
+    localStorage.setItem("maternal_ai_metrics", JSON.stringify(healthMetrics));
+  }, [healthMetrics]);
+
+  // Save symptom logs to local storage
+  useEffect(() => {
+    localStorage.setItem("maternal_ai_symptoms", JSON.stringify(symptomLogs));
+  }, [symptomLogs]);
+
+  // Save journal entries to local storage
+  useEffect(() => {
+    localStorage.setItem("maternal_ai_journal", JSON.stringify(journalEntries));
+  }, [journalEntries]);
 
   // Check for upcoming appointments every minute
   useEffect(() => {
@@ -246,6 +316,92 @@ function App() {
     });
   };
 
+  // Health Metrics Functions
+  const addHealthMetric = () => {
+    const weight = newMetric.weight ? parseFloat(newMetric.weight) : undefined;
+    const systolic = newMetric.systolic ? parseFloat(newMetric.systolic) : undefined;
+    const diastolic = newMetric.diastolic ? parseFloat(newMetric.diastolic) : undefined;
+    const bloodSugar = newMetric.bloodSugar ? parseFloat(newMetric.bloodSugar) : undefined;
+
+    if (!weight && !systolic && !bloodSugar) return;
+
+    const metric: HealthMetric = {
+      id: Date.now().toString(),
+      date: newMetric.date,
+      weight,
+      systolic,
+      diastolic,
+      bloodSugar
+    };
+    setHealthMetrics(prev => [...prev, metric].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    setNewMetric({ date: new Date().toISOString().split('T')[0], weight: "", systolic: "", diastolic: "", bloodSugar: "" });
+    setShowMetricsForm(false);
+  };
+
+  const removeHealthMetric = (id: string) => {
+    setHealthMetrics(prev => prev.filter(m => m.id !== id));
+  };
+
+  // Symptom Functions
+  const commonSymptoms = [
+    "Nausea", "Fatigue", "Back Pain", "Headache", "Swelling",
+    "Cramping", "Dizziness", "Heartburn", "Constipation", "Mood Swings"
+  ];
+
+  const addSymptomLog = () => {
+    if (selectedSymptoms.length === 0) return;
+
+    const log: SymptomLog = {
+      id: Date.now().toString(),
+      date: new Date().toISOString().split('T')[0],
+      symptoms: selectedSymptoms,
+      notes: symptomNotes
+    };
+    setSymptomLogs(prev => [...prev, log].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    setSelectedSymptoms([]);
+    setSymptomNotes("");
+    setShowSymptomForm(false);
+  };
+
+  const removeSymptomLog = (id: string) => {
+    setSymptomLogs(prev => prev.filter(l => l.id !== id));
+  };
+
+  // Journal Functions
+  const addJournalEntry = () => {
+    if (!newJournalEntry.title || !newJournalEntry.content) return;
+
+    const entry: JournalEntry = {
+      id: Date.now().toString(),
+      date: new Date().toISOString().split('T')[0],
+      title: newJournalEntry.title,
+      content: newJournalEntry.content
+    };
+    setJournalEntries(prev => [...prev, entry].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    setNewJournalEntry({ title: "", content: "" });
+    setShowJournalForm(false);
+  };
+
+  const removeJournalEntry = (id: string) => {
+    setJournalEntries(prev => prev.filter(e => e.id !== id));
+  };
+
+  // Kick Counter Functions
+  const startKickCounter = () => {
+    setKickCounterActive(true);
+    setKickStartTime(new Date());
+    setKickCount(0);
+    setShowKickCounterModal(true);
+  };
+
+  const recordKick = () => {
+    setKickCount(prev => prev + 1);
+  };
+
+  const stopKickCounter = () => {
+    setKickCounterActive(false);
+  };
+
   const submitTextFeedback = (index: number) => {
     if (!feedbackText.trim()) return;
     setMessages(prev => {
@@ -356,7 +512,7 @@ If a user mentions severe symptoms (like heavy bleeding, severe pain, or mental 
         <div className="noise-overlay"></div>
         
         {/* Header */}
-        <div className="px-8 pt-10 pb-4 bg-white/80 backdrop-blur-md flex items-center justify-between sticky top-0 z-30">
+        <div className="px-8 pt-10 pb-4 bg-white/80 backdrop-blur-md flex items-center justify-between sticky top-0 z-30 border-b border-slate-100">
           <div className="flex items-center gap-4">
             <motion.div 
               whileHover={{ scale: 1.05 }}
@@ -381,7 +537,7 @@ If a user mentions severe symptoms (like heavy bleeding, severe pain, or mental 
                 <Globe size={12} className="text-rose-400" />
                 {languages[selectedLang].label}
               </button>
-              <div className="absolute right-0 top-full mt-2 w-36 glass rounded-3xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all overflow-hidden text-slate-700 z-50 p-1">
+              <div className="absolute right-0 top-full mt-2 w-36 glass rounded-3xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all overflow-hidden text-slate-700 z-50 p-1 bg-white/80">
                 {(Object.keys(languages) as LanguageKey[]).map((key) => (
                   <button
                     key={key}
@@ -675,14 +831,22 @@ If a user mentions severe symptoms (like heavy bleeding, severe pain, or mental 
                         initial={{ opacity: 0, y: 10, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute bottom-full left-8 right-8 mb-4 bg-white rounded-[2rem] shadow-2xl border border-slate-100 p-4 z-50"
+                        className="absolute bottom-full left-0 right-0 mb-4 mx-4 bg-white rounded-[2rem] shadow-2xl border border-slate-100 p-5 z-50 max-h-96 overflow-y-auto"
                       >
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-4 gap-3">
                           {[
                             { label: "Diet Advice", icon: "🥗" },
                             { label: "Exercise", icon: "🧘‍♀️" },
                             { label: "Sleep Tips", icon: "🌙" },
                             { label: "Labor Signs", icon: "⚠️" },
+                            { label: "Vitamins", icon: "💊" },
+                            { label: "Morning Sickness", icon: "🤢" },
+                            { label: "Prenatal Care", icon: "🏥" },
+                            { label: "Water Intake", icon: "💧" },
+                            { label: "Stress Relief", icon: "🧘" },
+                            { label: "Baby Size", icon: "👶" },
+                            { label: "Weight Gain", icon: "⚖️" },
+                            { label: "Back Pain", icon: "🔙" },
                           ].map((item) => (
                             <button
                               key={item.label}
@@ -690,10 +854,10 @@ If a user mentions severe symptoms (like heavy bleeding, severe pain, or mental 
                                 setInput(`Tell me about ${item.label.toLowerCase()}`);
                                 setShowQuickActions(false);
                               }}
-                              className="flex items-center gap-3 p-3 hover:bg-rose-50 rounded-2xl transition-all text-left"
+                              className="flex items-center gap-2 p-2 hover:bg-rose-50 rounded-2xl transition-all text-center flex-col"
                             >
-                              <span className="text-lg">{item.icon}</span>
-                              <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">{item.label}</span>
+                              <span className="text-xl">{item.icon}</span>
+                              <span className="text-[7px] font-bold text-slate-600 uppercase tracking-widest line-clamp-2">{item.label}</span>
                             </button>
                           ))}
                         </div>
@@ -996,14 +1160,426 @@ If a user mentions severe symptoms (like heavy bleeding, severe pain, or mental 
                 </button>
               </motion.div>
             )}
+
+            {activeTab === "health" && (
+              <motion.div
+                key="health"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+                className="flex-1 overflow-y-auto px-8 py-6 space-y-8 no-scrollbar"
+              >
+                {/* Kick Counter Card */}
+                <motion.div 
+                  whileTap={{ scale: 0.95 }}
+                  onClick={startKickCounter}
+                  className="bento-card cursor-pointer flex items-center justify-between group p-6 transition-all hover:shadow-lg">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-500 group-hover:amber-gradient group-hover:text-white transition-all">
+                      <Zap size={24} />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-800">Kick Counter</h4>
+                      <p className="text-[10px] font-medium mt-1 text-slate-400">Track baby movements</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-slate-300" />
+                </motion.div>
+
+                {/* Health Metrics Section */}
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Health Metrics</h3>
+                    <motion.button 
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => setShowMetricsForm(!showMetricsForm)}
+                      className="rose-gradient text-white p-2.5 rounded-2xl shadow-lg shadow-rose-200"
+                    >
+                      <Plus size={16} />
+                    </motion.button>
+                  </div>
+
+                  {showMetricsForm && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      className="bento-card space-y-4 p-6"
+                    >
+                      <div className="space-y-2">
+                        <label className="text-[9px] font-bold uppercase tracking-widest ml-1">Date</label>
+                        <input
+                          type="date"
+                          value={newMetric.date}
+                          onChange={e => setNewMetric(prev => ({ ...prev, date: e.target.value }))}
+                          className="w-full p-3 text-sm rounded-2xl outline-none focus:ring-2 focus:ring-rose-400 transition-all bg-slate-50 border-slate-100 border"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <label className="text-[9px] font-bold uppercase tracking-widest ml-1">Weight (kg)</label>
+                          <input
+                            type="number"
+                            placeholder="e.g., 65.5"
+                            value={newMetric.weight}
+                            onChange={e => setNewMetric(prev => ({ ...prev, weight: e.target.value }))}
+                            step="0.1"
+                            className="w-full p-3 text-sm rounded-2xl outline-none focus:ring-2 focus:ring-rose-400 transition-all bg-slate-50 border-slate-100 border"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[9px] font-bold uppercase tracking-widest ml-1">Blood Sugar</label>
+                          <input
+                            type="number"
+                            placeholder="e.g., 95"
+                            value={newMetric.bloodSugar}
+                            onChange={e => setNewMetric(prev => ({ ...prev, bloodSugar: e.target.value }))}
+                            className="w-full p-3 text-sm rounded-2xl outline-none focus:ring-2 focus:ring-rose-400 transition-all bg-slate-50 border-slate-100 border"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <label className="text-[9px] font-bold uppercase tracking-widest ml-1">BP Systolic</label>
+                          <input
+                            type="number"
+                            placeholder="e.g., 120"
+                            value={newMetric.systolic}
+                            onChange={e => setNewMetric(prev => ({ ...prev, systolic: e.target.value }))}
+                            className="w-full p-3 text-sm rounded-2xl outline-none focus:ring-2 focus:ring-rose-400 transition-all bg-slate-50 border-slate-100 border"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[9px] font-bold uppercase tracking-widest ml-1">BP Diastolic</label>
+                          <input
+                            type="number"
+                            placeholder="e.g., 80"
+                            value={newMetric.diastolic}
+                            onChange={e => setNewMetric(prev => ({ ...prev, diastolic: e.target.value }))}
+                            className="w-full p-3 text-sm rounded-2xl outline-none focus:ring-2 focus:ring-rose-400 transition-all bg-slate-50 border-slate-100 border"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-3 pt-2">
+                        <button
+                          onClick={addHealthMetric}
+                          className="flex-1 py-3 bg-rose-500 text-white rounded-2xl text-xs font-bold shadow-lg shadow-rose-200 hover:bg-rose-600 transition-all flex items-center justify-center gap-2"
+                        >
+                          <Check size={14} /> Save Metric
+                        </button>
+                        <button
+                          onClick={() => setShowMetricsForm(false)}
+                          className="flex-1 py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        >
+                          <X size={14} /> Cancel
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {healthMetrics.length === 0 ? (
+                    <div className="bento-card py-8 text-center border-dashed border-2">
+                      <p className="text-xs font-medium text-slate-400">No health metrics yet</p>
+                      <button onClick={() => setShowMetricsForm(true)} className="mt-3 text-xs font-bold text-rose-500 underline">Add your first metric</button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {healthMetrics.map(metric => (
+                        <motion.div 
+                          layout
+                          key={metric.id} 
+                          className="bento-card !p-4 group relative"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-4 flex-wrap">
+                                {metric.weight && <span className="text-xs font-bold px-3 py-1 rounded-full bg-rose-50 text-rose-600">⚖️ {metric.weight}kg</span>}
+                                {metric.systolic && metric.diastolic && <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-50 text-blue-600">🩸 {metric.systolic}/{metric.diastolic}</span>}
+                                {metric.bloodSugar && <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-50 text-amber-600">🩺 {metric.bloodSugar} mg/dL</span>}
+                              </div>
+                              <p className="text-[9px] font-bold uppercase tracking-widest mt-2 text-slate-400">{new Date(metric.date).toLocaleDateString()}</p>
+                            </div>
+                            <button 
+                              onClick={() => removeHealthMetric(metric.id)}
+                              className="p-2 opacity-0 group-hover:opacity-100 transition-all text-slate-300 hover:text-red-500"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Symptom Tracker Section */}
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Symptom Tracker</h3>
+                    <motion.button 
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => setShowSymptomForm(!showSymptomForm)}
+                      className="rose-gradient text-white p-2.5 rounded-2xl shadow-lg shadow-rose-200"
+                    >
+                      <Plus size={16} />
+                    </motion.button>
+                  </div>
+
+                  {showSymptomForm && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      className="bento-card space-y-4 p-6"
+                    >
+                      <div className="space-y-3">
+                        <label className="text-[9px] font-bold uppercase tracking-widest ml-1 block">Select Symptoms</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {commonSymptoms.map(symptom => (
+                            <button
+                              key={symptom}
+                              onClick={() => setSelectedSymptoms(prev => prev.includes(symptom) ? prev.filter(s => s !== symptom) : [...prev, symptom])}
+                              className={`p-3 rounded-2xl text-xs font-bold transition-all ${selectedSymptoms.includes(symptom) ? "rose-gradient text-white shadow-lg shadow-rose-200" : "bg-slate-50 text-slate-600 border border-slate-100"}`}
+                            >
+                              {symptom}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[9px] font-bold uppercase tracking-widest ml-1">Notes</label>
+                        <textarea
+                          placeholder="Additional notes..."
+                          value={symptomNotes}
+                          onChange={e => setSymptomNotes(e.target.value)}
+                          className="w-full p-3 text-sm rounded-2xl outline-none focus:ring-2 focus:ring-rose-400 transition-all resize-none h-20 bg-slate-50 border-slate-100 border"
+                        />
+                      </div>
+                      <div className="flex gap-3 pt-2">
+                        <button
+                          onClick={addSymptomLog}
+                          className="flex-1 py-3 bg-rose-500 text-white rounded-2xl text-xs font-bold shadow-lg shadow-rose-200 hover:bg-rose-600 transition-all flex items-center justify-center gap-2"
+                        >
+                          <Check size={14} /> Log Symptoms
+                        </button>
+                        <button
+                          onClick={() => setShowSymptomForm(false)}
+                          className="flex-1 py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        >
+                          <X size={14} /> Cancel
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {symptomLogs.length === 0 ? (
+                    <div className="bento-card py-8 text-center border-dashed border-2">
+                      <p className="text-xs font-medium text-slate-400">No symptoms logged yet</p>
+                      <button onClick={() => setShowSymptomForm(true)} className="mt-3 text-xs font-bold text-rose-500 underline">Log your symptoms</button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {symptomLogs.slice(0, 5).map(log => (
+                        <motion.div 
+                          layout
+                          key={log.id} 
+                          className="bento-card !p-4 group"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex flex-wrap gap-2 mb-2">
+                                {log.symptoms.map(symptom => (
+                                  <span key={symptom} className="text-[8px] font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-600">{symptom}</span>
+                                ))}
+                              </div>
+                              {log.notes && <p className="text-xs mt-2 text-slate-600 line-clamp-2">{log.notes}</p>}
+                              <p className="text-[9px] font-bold uppercase tracking-widest mt-2 text-slate-400">{new Date(log.date).toLocaleDateString()}</p>
+                            </div>
+                            <button 
+                              onClick={() => removeSymptomLog(log.id)}
+                              className="p-2 opacity-0 group-hover:opacity-100 transition-all text-slate-300 hover:text-red-500"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === "journal" && (
+              <motion.div
+                key="journal"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+                className="flex-1 overflow-y-auto px-8 py-6 space-y-8 no-scrollbar"
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">My Journey</h3>
+                  <motion.button 
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => setShowJournalForm(!showJournalForm)}
+                    className="rose-gradient text-white p-2.5 rounded-2xl shadow-lg shadow-rose-200"
+                  >
+                    <Plus size={16} />
+                  </motion.button>
+                </div>
+
+                {showJournalForm && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    className="bento-card space-y-4 p-6"
+                  >
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-bold uppercase tracking-widest ml-1">Title</label>
+                      <input
+                        type="text"
+                        placeholder="e.g., First kick felt today!"
+                        value={newJournalEntry.title}
+                        onChange={e => setNewJournalEntry(prev => ({ ...prev, title: e.target.value }))}
+                        className="w-full p-3 text-sm rounded-2xl outline-none focus:ring-2 focus:ring-rose-400 transition-all bg-slate-50 border-slate-100 border"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-bold uppercase tracking-widest ml-1">Entry</label>
+                      <textarea
+                        placeholder="Write your thoughts, feelings, and memories..."
+                        value={newJournalEntry.content}
+                        onChange={e => setNewJournalEntry(prev => ({ ...prev, content: e.target.value }))}
+                        className="w-full p-3 text-sm rounded-2xl outline-none focus:ring-2 focus:ring-rose-400 transition-all resize-none h-32 bg-slate-50 border-slate-100 border"
+                      />
+                    </div>
+                    <div className="flex gap-3 pt-2">
+                      <button
+                        onClick={addJournalEntry}
+                        className="flex-1 py-3 bg-rose-500 text-white rounded-2xl text-xs font-bold shadow-lg shadow-rose-200 hover:bg-rose-600 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Check size={14} /> Save Entry
+                      </button>
+                      <button
+                        onClick={() => setShowJournalForm(false)}
+                        className="flex-1 py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      >
+                        <X size={14} /> Cancel
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+
+                {journalEntries.length === 0 ? (
+                  <div className="bento-card py-12 text-center border-dashed border-2">
+                    <p className="text-xs font-medium text-slate-400">Your journal is empty</p>
+                    <button onClick={() => setShowJournalForm(true)} className="mt-4 text-xs font-bold text-rose-500 underline">Start writing your first entry</button>
+                  </div>
+                ) : (
+                  <div className="space-y-4 pb-24">
+                    {journalEntries.map(entry => (
+                      <motion.div 
+                        layout
+                        key={entry.id} 
+                        className="bento-card !p-6 group cursor-default transition-all hover:shadow-lg"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-baseline gap-3 mb-2">
+                              <h4 className="font-bold text-base text-slate-800">{entry.title}</h4>
+                              <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">{new Date(entry.date).toLocaleDateString()}</p>
+                            </div>
+                            <p className="text-sm leading-relaxed text-slate-600 line-clamp-3">{entry.content}</p>
+                          </div>
+                          <button 
+                            onClick={() => removeJournalEntry(entry.id)}
+                            className="p-2 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0 text-slate-300 hover:text-red-500"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
           </AnimatePresence>
         </div>
 
+        {/* Kick Counter Modal */}
+        <AnimatePresence>
+          {showKickCounterModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6"
+            >
+              <motion.div
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
+                transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                className="w-full max-w-sm rounded-[3rem] p-10 shadow-2xl space-y-8 relative overflow-hidden bg-white"
+              >
+                <div className="absolute top-0 left-0 w-full h-2 rose-gradient opacity-50"></div>
+                
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-serif italic font-medium text-slate-900">Kick Counter</h2>
+                    <p className="text-[10px] font-bold uppercase tracking-widest mt-1 text-slate-400">Track baby's movements</p>
+                  </div>
+                  <button onClick={() => { setShowKickCounterModal(false); stopKickCounter(); }} className="p-3 rounded-2xl transition-all bg-slate-50 text-slate-400 hover:bg-slate-100 hover:text-rose-500">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="flex flex-col items-center gap-8">
+                  <div className="w-32 h-32 rounded-full rose-gradient flex items-center justify-center text-white shadow-xl shadow-rose-200">
+                    <span className="text-6xl font-bold">{kickCount}</span>
+                  </div>
+                  
+                  <button
+                    onClick={recordKick}
+                    disabled={!kickCounterActive}
+                    className="w-full py-6 rounded-[2rem] font-bold text-lg shadow-xl transition-all rose-gradient text-white shadow-rose-200 hover:scale-105"
+                  >
+                    TAP TO COUNT KICK
+                  </button>
+
+                  {kickStartTime && (
+                    <p className="text-sm font-medium text-slate-600">
+                      Started at {kickStartTime.toLocaleTimeString()}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => { stopKickCounter(); setShowKickCounterModal(false); }}
+                    className="flex-1 py-4 rounded-[1.5rem] font-bold text-xs uppercase tracking-widest transition-all bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  >
+                    Done
+                  </button>
+                  <button
+                    onClick={() => setKickCount(0)}
+                    className="flex-1 py-4 bg-slate-200 text-slate-600 rounded-[1.5rem] font-bold text-xs uppercase tracking-widest hover:bg-slate-300 transition-all"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Bottom Navigation */}
-        <div className="bg-white/80 backdrop-blur-md border-t border-slate-100 px-10 py-6 flex items-center justify-between sticky bottom-0 z-30">
+        <div className="bg-white/80 backdrop-blur-md border-t border-slate-100 px-10 py-4 flex items-center justify-between sticky bottom-0 z-30 overflow-x-auto no-scrollbar">
           <button 
             onClick={() => setActiveTab("home")}
-            className={`flex flex-col items-center gap-1.5 transition-all relative ${activeTab === "home" ? "text-rose-500" : "text-slate-300 hover:text-slate-400"}`}
+            className={`flex flex-col items-center gap-1.5 transition-all relative whitespace-nowrap min-w-max ${activeTab === "home" ? "text-rose-500" : "text-slate-300 hover:text-slate-400"}`}
           >
             <Home size={24} fill={activeTab === "home" ? "currentColor" : "none"} />
             <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Home</span>
@@ -1011,23 +1587,39 @@ If a user mentions severe symptoms (like heavy bleeding, severe pain, or mental 
           </button>
           <button 
             onClick={() => setActiveTab("chat")}
-            className={`flex flex-col items-center gap-1.5 transition-all relative ${activeTab === "chat" ? "text-rose-500" : "text-slate-300 hover:text-slate-400"}`}
+            className={`flex flex-col items-center gap-1.5 transition-all relative whitespace-nowrap min-w-max ${activeTab === "chat" ? "text-rose-500" : "text-slate-300 hover:text-slate-400"}`}
           >
             <MessageSquare size={24} fill={activeTab === "chat" ? "currentColor" : "none"} />
             <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Chat</span>
             {activeTab === "chat" && <motion.div layoutId="nav-dot" className="absolute -bottom-2 w-1 h-1 bg-rose-500 rounded-full" />}
           </button>
           <button 
+            onClick={() => setActiveTab("health")}
+            className={`flex flex-col items-center gap-1.5 transition-all relative whitespace-nowrap min-w-max ${activeTab === "health" ? "text-rose-500" : "text-slate-300 hover:text-slate-400"}`}
+          >
+            <Activity size={24} fill={activeTab === "health" ? "currentColor" : "none"} />
+            <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Health</span>
+            {activeTab === "health" && <motion.div layoutId="nav-dot" className="absolute -bottom-2 w-1 h-1 bg-rose-500 rounded-full" />}
+          </button>
+          <button 
             onClick={() => setActiveTab("calendar")}
-            className={`flex flex-col items-center gap-1.5 transition-all relative ${activeTab === "calendar" ? "text-rose-500" : "text-slate-300 hover:text-slate-400"}`}
+            className={`flex flex-col items-center gap-1.5 transition-all relative whitespace-nowrap min-w-max ${activeTab === "calendar" ? "text-rose-500" : "text-slate-300 hover:text-slate-400"}`}
           >
             <Calendar size={24} fill={activeTab === "calendar" ? "currentColor" : "none"} />
             <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Plan</span>
             {activeTab === "calendar" && <motion.div layoutId="nav-dot" className="absolute -bottom-2 w-1 h-1 bg-rose-500 rounded-full" />}
           </button>
           <button 
+            onClick={() => setActiveTab("journal")}
+            className={`flex flex-col items-center gap-1.5 transition-all relative whitespace-nowrap min-w-max ${activeTab === "journal" ? "text-rose-500" : "text-slate-300 hover:text-slate-400"}`}
+          >
+            <BookOpen size={24} fill={activeTab === "journal" ? "currentColor" : "none"} />
+            <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Journal</span>
+            {activeTab === "journal" && <motion.div layoutId="nav-dot" className="absolute -bottom-2 w-1 h-1 bg-rose-500 rounded-full" />}
+          </button>
+          <button 
             onClick={() => setActiveTab("profile")}
-            className={`flex flex-col items-center gap-1.5 transition-all relative ${activeTab === "profile" ? "text-rose-500" : "text-slate-300 hover:text-slate-400"}`}
+            className={`flex flex-col items-center gap-1.5 transition-all relative whitespace-nowrap min-w-max ${activeTab === "profile" ? "text-rose-500" : "text-slate-300 hover:text-slate-400"}`}
           >
             <User size={24} fill={activeTab === "profile" ? "currentColor" : "none"} />
             <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Profile</span>
