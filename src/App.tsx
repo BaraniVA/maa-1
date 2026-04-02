@@ -32,6 +32,7 @@ interface Appointment {
   date: string;
   time: string;
   notified?: boolean;
+  notifiedTwoDaysBefore?: boolean;
 }
 
 declare global {
@@ -74,7 +75,7 @@ function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [newAppt, setNewAppt] = useState({ title: "", date: "", time: "" });
-  const [activeNotification, setActiveNotification] = useState<Appointment | null>(null);
+  const [activeNotification, setActiveNotification] = useState<(Appointment & { isTwoDayNotification?: boolean }) | null>(null);
   const [editingApptId, setEditingApptId] = useState<string | null>(null);
   const [editApptData, setEditApptData] = useState({ title: "", date: "", time: "" });
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -102,6 +103,13 @@ function App() {
       const updatedAppts = appointments.map(appt => {
         const apptDateTime = new Date(`${appt.date}T${appt.time}`);
         const diffInMinutes = (apptDateTime.getTime() - now.getTime()) / (1000 * 60);
+        const twoDaysInMinutes = 2 * 24 * 60; // 2880 minutes
+        
+        // Notify if appointment is 2 days away and not yet notified
+        if (diffInMinutes > twoDaysInMinutes - 1 && diffInMinutes <= twoDaysInMinutes && !appt.notifiedTwoDaysBefore) {
+          setActiveNotification({ ...appt, isTwoDayNotification: true } as any);
+          return { ...appt, notifiedTwoDaysBefore: true };
+        }
         
         // Notify if appointment is within 30 minutes and not yet notified
         if (diffInMinutes > 0 && diffInMinutes <= 30 && !appt.notified) {
@@ -187,7 +195,8 @@ function App() {
     const appt: Appointment = {
       id: Date.now().toString(),
       ...newAppt,
-      notified: false
+      notified: false,
+      notifiedTwoDaysBefore: false
     };
     setAppointments(prev => [...prev, appt].sort((a, b) => 
       new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime()
@@ -207,7 +216,7 @@ function App() {
   const saveEdit = () => {
     if (!editingApptId || !editApptData.title || !editApptData.date || !editApptData.time) return;
     setAppointments(prev => prev.map(a => 
-      a.id === editingApptId ? { ...a, ...editApptData, notified: false } : a
+      a.id === editingApptId ? { ...a, ...editApptData, notified: false, notifiedTwoDaysBefore: false } : a
     ).sort((a, b) => 
       new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime()
     ));
@@ -1117,11 +1126,18 @@ If a user mentions severe symptoms (like heavy bleeding, severe pain, or mental 
             >
               <div className="glass-dark text-white rounded-[2.5rem] p-6 shadow-2xl flex items-center gap-5">
                 <div className="rose-gradient p-3 rounded-2xl shadow-lg shadow-rose-500/20">
-                  <Bell size={24} className="animate-bounce" />
+                  <Bell size={24} className={activeNotification.isTwoDayNotification ? "animate-pulse" : "animate-bounce"} />
                 </div>
                 <div className="flex-1">
-                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-rose-400 mb-0.5">Upcoming Visit</h4>
-                  <p className="text-sm font-medium text-slate-100">{activeNotification.title} at {activeNotification.time}</p>
+                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-rose-400 mb-0.5">
+                    {activeNotification.isTwoDayNotification ? "Appointment Reminder" : "Upcoming Visit"}
+                  </h4>
+                  <p className="text-sm font-medium text-slate-100">
+                    {activeNotification.isTwoDayNotification 
+                      ? `${activeNotification.title} is on ${new Date(activeNotification.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${activeNotification.time}`
+                      : `${activeNotification.title} at ${activeNotification.time}`
+                    }
+                  </p>
                 </div>
                 <button onClick={() => setActiveNotification(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={20} /></button>
               </div>
